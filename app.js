@@ -13,7 +13,7 @@ const addTextBtn = document.getElementById('add-text-btn');
 const addSigBtn = document.getElementById('add-sig-btn');
 const addStampBtn = document.getElementById('add-stamp-btn');
 
-// --- הודעות שגיאה ---
+// הודעות שגיאה
 const errorMsg = document.createElement('div');
 errorMsg.style.cssText = 'color:white; background:#e74c3c; padding:10px; text-align:center; display:none; position:fixed; top:0; width:100%; z-index:9999; font-weight:bold; direction:rtl;';
 document.body.prepend(errorMsg);
@@ -29,26 +29,23 @@ let pdfDoc = null;
 let pageNum = 1;
 let scale = 1.5;
 let signaturePad = null;
-let hebrewFontBytes = null; // ישמור את הפונט אם הצלחנו לטעון
+let hebrewFontBytes = null;
 
 // פונקציית עזר להצגת שגיאות
 const showError = (msg, isCritical = false) => {
     console.error(msg);
     errorMsg.innerText = msg;
     errorMsg.style.display = 'block';
-    errorMsg.style.background = isCritical ? '#e74c3c' : '#f39c12'; // כתום לאזהרה, אדום לקריטי
+    errorMsg.style.background = isCritical ? '#e74c3c' : '#f39c12';
     setTimeout(() => errorMsg.style.display = 'none', 5000);
 };
 
-// --- טעינת פונט בטוחה (Fail-Safe) ---
+// --- טעינת פונט בטוחה ---
 const loadFontSafe = async () => {
-    if (hebrewFontBytes) return true; // כבר נטען
-    
+    if (hebrewFontBytes) return true;
     try {
         console.log(`מנסה לטעון פונט מ: ${HEBREW_FONT_LOCAL}`);
-        // הוספנו time stamp כדי למנוע מהדפדפן לשמור גרסה ישנה שגויה
         const res = await fetch(`${HEBREW_FONT_LOCAL}?v=${new Date().getTime()}`);
-        
         if (!res.ok) throw new Error(`קובץ לא נמצא (${res.status})`);
         
         const buffer = await res.arrayBuffer();
@@ -76,12 +73,11 @@ const initSignaturePad = () => {
 // --- טעינת PDF ---
 const renderPDF = async (buffer) => {
     try {
-        // מנסים לטעון פונט, אבל לא עוצרים אם נכשל
-        loadFontSafe();
+        loadFontSafe(); // טעינת פונט ברקע
 
         const pdfCopy = buffer.slice(0);
 
-        // תצוגה (PDF.js)
+        // תצוגה
         const loadingTask = pdfjsLib.getDocument({ data: buffer, cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/', cMapPacked: true });
         const pdf = await loadingTask.promise;
         const page = await pdf.getPage(pageNum);
@@ -95,11 +91,10 @@ const renderPDF = async (buffer) => {
         pdfContainer.innerHTML = ''; pdfContainer.appendChild(canvas);
         await page.render({ canvasContext: context, viewport }).promise;
 
-        // עריכה (PDF-Lib)
+        // עריכה
         pdfDoc = await PDFLib.PDFDocument.load(pdfCopy);
         if (typeof fontkit !== 'undefined') pdfDoc.registerFontkit(fontkit);
         
-        // שחרור כפתורים
         [saveBtn, addTextBtn, addSigBtn, addStampBtn].forEach(btn => btn.disabled = false);
         
         pdfContainer.dataset.pdfWidth = viewport.width; 
@@ -125,7 +120,6 @@ const makeDraggable = (el) => {
     
     el.addEventListener('dblclick', () => { if (confirm('למחוק?')) el.remove(); });
     
-    // שינוי גודל תמונה
     if (el.querySelector('img')) {
         el.addEventListener('click', () => {
             if (isDragging) return;
@@ -186,7 +180,7 @@ confirmSigBtn.addEventListener('click', () => {
     sigModal.classList.add('hidden');
 });
 
-// --- שמירה ושיתוף (מנגנון יציב) ---
+// --- שמירה ושיתוף ---
 saveBtn.addEventListener('click', async () => {
     if (!pdfDoc) return;
     saveBtn.innerText = 'שומר...'; saveBtn.disabled = true;
@@ -197,45 +191,38 @@ saveBtn.addEventListener('click', async () => {
         const scaleX = width / parseFloat(pdfContainer.dataset.pdfWidth);
         const scaleY = height / parseFloat(pdfContainer.dataset.pdfHeight);
 
-        // ניסיון להטמיע פונט
+        // הטמעת פונט
         let customFont = null;
         if (hebrewFontBytes) {
-            try {
-                customFont = await pdfDoc.embedFont(hebrewFontBytes, { subset: true });
-            } catch (e) { console.warn("הטמעת פונט נכשלה, עובר לברירת מחדל"); }
+            try { customFont = await pdfDoc.embedFont(hebrewFontBytes, { subset: true }); } 
+            catch (e) { console.warn("הטמעת פונט נכשלה"); }
         }
-
-        // אם אין פונט עברית, נשתמש בפונט סטנדרטי (אנגלית בלבד)
-        // זה מונע קריסה, גם אם העברית לא תעבוד
-        if (!customFont) {
-            customFont = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
-        }
+        if (!customFont) customFont = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
 
         // שמירת טקסט
         const textInputs = document.querySelectorAll('.text-input');
         for (const input of textInputs) {
             const val = input.value;
             if (!val || val.trim() === '') continue;
-            
             const wrapper = input.parentElement;
             const x = wrapper.offsetLeft * scaleX;
             const y = height - (wrapper.offsetTop * scaleY) - (18 * scaleY);
-            
-            page.drawText(val, { 
-                x, y, 
-                size: 18 * scaleY, 
-                font: customFont,
-                color: PDFLib.rgb(0,0,0),
-                features: { rtl: true } // ינסה ליישר, יעבוד רק עם הפונט העברי
-            });
+            page.drawText(val, { x, y, size: 18 * scaleY, font: customFont, color: PDFLib.rgb(0,0,0), features: { rtl: true } });
         }
 
-        // שמירת תמונות
+        // שמירת תמונות (כאן היה התיקון הקריטי)
         const images = document.querySelectorAll('.draggable img');
         for (const img of images) {
             const wrapper = img.parentElement;
             const bytes = await fetch(img.src).then(res => res.arrayBuffer());
-            let pdfImage = (img.dataset.type === 'jpeg' || img.src.endsWith('.jpg')) ? await pdfDoc.embedJpeg(bytes) : await pdfDoc.embedPng(bytes);
+            
+            let pdfImage;
+            // תיקון: שימוש ב-embedJpg במקום embedJpeg
+            if (img.dataset.type === 'jpeg' || img.src.toLowerCase().endsWith('.jpg') || img.src.toLowerCase().endsWith('.jpeg')) {
+                pdfImage = await pdfDoc.embedJpg(bytes); // <-- תוקן כאן
+            } else {
+                pdfImage = await pdfDoc.embedPng(bytes);
+            }
             
             const w = img.offsetWidth * scaleX; const h = img.offsetHeight * scaleY;
             const x = wrapper.offsetLeft * scaleX;
