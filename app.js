@@ -1,3 +1,7 @@
+// --- Configuration ---
+// Ensure worker matches the library version exactly
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
 // --- DOM Elements ---
 const fileInput = document.getElementById('file-upload');
 const pdfContainer = document.getElementById('pdf-container');
@@ -5,6 +9,12 @@ const saveBtn = document.getElementById('save-btn');
 const shareBtn = document.getElementById('share-btn');
 const addTextBtn = document.getElementById('add-text-btn');
 const addSigBtn = document.getElementById('add-sig-btn');
+const errorMsg = document.createElement('div'); // Dynamic error display
+errorMsg.style.color = 'red';
+errorMsg.style.padding = '10px';
+errorMsg.style.textAlign = 'center';
+errorMsg.style.display = 'none';
+pdfContainer.parentElement.insertBefore(errorMsg, pdfContainer);
 
 // Modal Elements
 const sigModal = document.getElementById('signature-modal');
@@ -14,73 +24,132 @@ const confirmSigBtn = document.getElementById('confirm-sig');
 const cancelSigBtn = document.getElementById('cancel-sig');
 
 // --- State ---
-let pdfDoc = null; // The PDF-lib document
-let pdfBytes = null; // Raw PDF bytes
-let pageNum = 1; // Currently editing page 1 (MVP limitation)
-let scale = 1.5; // Viewport scale
+let pdfDoc = null;
+let pdfBytes = null;
+let pageNum = 1;
+let scale = 1.5;
 let signaturePad = null;
+
+// --- Helpers ---
+
+// CRITICAL: Validate that the file is actually a PDF using "Magic Bytes"
+const validatePDFHeader = (uint8Array) => {
+    if (uint8Array.length < 4) return false;
+    // Check for %PDF (Hex: 25 50 44 46)
+    return uint8Array[0] === 0x25 && 
+           uint8Array[1] === 0x50 && 
+           uint8Array[2] === 0x44 && 
+           uint8Array[3] === 0x46;
+};
+
+const showError = (msg) => {
+    console.error(msg);
+    errorMsg.textContent = `Error: ${msg}`;
+    errorMsg.style.display = 'block';
+    // Hide pdf container on critical error
+    pdfContainer.style.opacity = '0.5';
+};
+
+const clearError = () => {
+    errorMsg.style.display = 'none';
+    pdfContainer.style.opacity = '1';
+};
 
 // --- Initialization ---
 const initSignaturePad = () => {
+    if (signaturePad) return;
     signaturePad = new SignaturePad(sigCanvas, { minWidth: 1, maxWidth: 3 });
-    // Resize canvas for high DPI
     const ratio = Math.max(window.devicePixelRatio || 1, 1);
     sigCanvas.width = sigCanvas.offsetWidth * ratio;
     sigCanvas.height = sigCanvas.offsetHeight * ratio;
     sigCanvas.getContext("2d").scale(ratio, ratio);
 };
 
-// --- PDF Rendering (View) ---
+// --- PDF Rendering ---
 const renderPDF = async (uint8Array) => {
-    // 1. Load document in PDF.js for rendering
-    const loadingTask = pdfjsLib.getDocument({ data: uint8Array });
-    const pdf = await loadingTask.promise;
-    const page = await pdf.getPage(pageNum);
+    clearError();
+    try {
+        // 1. Validate Header
+        if (!validatePDFHeader(uint8Array)) {
+            throw new Error("Invalid file format. The file does not have a valid '%PDF-' header.");
+        }
 
-    const viewport = page.getViewport({ scale });
-    
-    // Create Canvas for Background
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    canvas.height = viewport.height;
-    canvas.width = viewport.width;
-    
-    // Set container dimensions
-    pdfContainer.style.width = `${viewport.width}px`;
-    pdfContainer.style.height = `${viewport.height}px`;
-    pdfContainer.innerHTML = ''; // Clear previous
-    pdfContainer.appendChild(canvas);
+        // 2. Load in PDF.js (Visual)
+        const loadingTask = pdfjsLib.getDocument({ 
+            data: uint8Array,
+            cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
+            cMapPacked: true
+        });
+        
+        const pdf = await loadingTask.promise;
+        const page = await pdf.getPage(pageNum);
+        const viewport = page.getViewport({ scale });
+        
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        
+        pdfContainer.style.width = `${viewport.width}px`;
+        pdfContainer.style.height = `${viewport.height}px`;
+        pdfContainer.innerHTML = ''; 
+        pdfContainer.appendChild(canvas);
 
-    // Render PDF page to canvas
-    await page.render({ canvasContext: context, viewport }).promise;
+        await page.render({ canvasContext: context, viewport }).promise;
 
-    // 2. Load document in PDF-Lib for Editing (Logic)
-    pdfDoc = await PDFLib.PDFDocument.load(uint8Array);
-    
-    // Enable buttons
-    saveBtn.disabled = false;
-    addTextBtn.disabled = false;
-    addSigBtn.disabled = false;
-    
-    // Store scale info for saving
-    pdfContainer.dataset.pdfWidth = viewport.width;
-    pdfContainer.dataset.pdfHeight = viewport.height;
+        // 3. Load in PDF-Lib (Editing Logic)
+        // Pass a copy of the buffer to avoid detachment issues
+        pdfDoc = await PDFLib.PDFDocument.load(uint8Array.slice(0));
+        
+        // Enable UI
+        saveBtn.disabled = false;
+        addTextBtn.disabled = false;
+        addSigBtn.disabled = false;
+        pdfContainer.dataset.pdfWidth = viewport.width;
+        pdfContainer.dataset.pdfHeight = viewport.height;
+
+        console.log("PDF Loaded Successfully");
+
+    } catch (err) {
+        showError(err.message);
+    }
 };
 
 // --- File Handling ---
 fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
-    if (file) {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            pdfBytes = new Uint8Array(ev.target.result);
-            renderPDF(pdfBytes);
-        };
-        reader.readAsArrayBuffer(file);
+    if (!file) return;
+
+    // Basic MIME type check
+    if (file.type !== 'application/pdf') {
+        showError("Selected file is not a PDF (MIME type mismatch).");
+        return;
     }
+
+    const reader = new FileReader();
+    
+    reader.onload = (ev) => {
+        try {
+            if (ev.target.result) {
+                // Ensure strictly Uint8Array
+                pdfBytes = new Uint8Array(ev.target.result);
+                renderPDF(pdfBytes);
+            } else {
+                throw new Error("File could not be read (empty result).");
+            }
+        } catch (err) {
+            showError("Failed to process file data: " + err.message);
+        }
+    };
+
+    reader.onerror = () => showError("Error reading file from disk.");
+    
+    // CRITICAL: Read as ArrayBuffer, NOT text
+    reader.readAsArrayBuffer(file);
 });
 
-// --- UI Interaction (Adding Elements) ---
+// --- UI Logic (Draggable, Saving, etc.) ---
+// ... (Keep existing draggable logic, it was fine) ...
 
 // Helper: Make element draggable
 const makeDraggable = (el) => {
@@ -97,12 +166,11 @@ const makeDraggable = (el) => {
 
     const doDrag = (e) => {
         if (!isDragging) return;
-        e.preventDefault(); // Prevent scroll on mobile
+        e.preventDefault(); 
         const currentX = e.clientX || e.touches[0].clientX;
         const currentY = e.clientY || e.touches[0].clientY;
         const dx = currentX - startX;
         const dy = currentY - startY;
-        
         el.style.left = `${initialLeft + dx}px`;
         el.style.top = `${initialTop + dy}px`;
     };
@@ -111,36 +179,30 @@ const makeDraggable = (el) => {
 
     el.addEventListener('mousedown', startDrag);
     el.addEventListener('touchstart', startDrag, {passive: false});
-    
     window.addEventListener('mousemove', doDrag);
     window.addEventListener('touchmove', doDrag, {passive: false});
-    
     window.addEventListener('mouseup', stopDrag);
     window.addEventListener('touchend', stopDrag);
 };
 
-// Add Text
 addTextBtn.addEventListener('click', () => {
     const div = document.createElement('div');
     div.className = 'draggable';
     div.style.top = '50px';
     div.style.left = '50px';
-    
     const input = document.createElement('input');
     input.className = 'text-input';
     input.value = 'Text Here';
     input.type = 'text';
-    
     div.appendChild(input);
     pdfContainer.appendChild(div);
     makeDraggable(div);
     input.focus();
 });
 
-// Add Signature Handling
 addSigBtn.addEventListener('click', () => {
     sigModal.classList.remove('hidden');
-    if (!signaturePad) initSignaturePad();
+    initSignaturePad(); // Initialize only when needed
     signaturePad.clear();
 });
 
@@ -149,110 +211,71 @@ clearSigBtn.addEventListener('click', () => signaturePad.clear());
 
 confirmSigBtn.addEventListener('click', () => {
     if (signaturePad.isEmpty()) return;
-    
     const imgData = signaturePad.toDataURL('image/png');
     const img = document.createElement('img');
     img.src = imgData;
-    img.style.width = '200px'; // Visual width
-    
+    img.style.width = '200px';
     const div = document.createElement('div');
     div.className = 'draggable signature-element';
     div.style.top = '100px';
     div.style.left = '100px';
     div.appendChild(img);
-    
     pdfContainer.appendChild(div);
     makeDraggable(div);
-    
     sigModal.classList.add('hidden');
 });
 
-// --- Saving Logic (The hard part) ---
 const savePDF = async () => {
     try {
+        if (!pdfDoc) return;
         const pages = pdfDoc.getPages();
-        const firstPage = pages[0]; // Editing page 1
+        const firstPage = pages[0];
         const { width, height } = firstPage.getSize();
-        
-        // Rendered dimensions
         const renderedWidth = parseFloat(pdfContainer.dataset.pdfWidth);
         const renderedHeight = parseFloat(pdfContainer.dataset.pdfHeight);
-        
-        // Calculate scale ratio between CSS pixels and PDF points
         const scaleX = width / renderedWidth;
         const scaleY = height / renderedHeight;
 
-        // Process Text Inputs
         const inputs = pdfContainer.querySelectorAll('.text-input');
         for (const input of inputs) {
             const wrapper = input.parentElement;
             const text = input.value;
-            // PDF coordinate system is bottom-left, DOM is top-left
             const x = wrapper.offsetLeft * scaleX;
-            // y calculation: PDF Height - (Top offset * scale) - (Approx text height adjustment)
-            const y = height - (wrapper.offsetTop * scaleY) - (12 * scaleY); // 12 is approx font size adjustment
-            
-            firstPage.drawText(text, {
-                x: x,
-                y: y,
-                size: 16 * scaleY, // Scale font size
-                color: PDFLib.rgb(0, 0, 0),
-            });
+            const y = height - (wrapper.offsetTop * scaleY) - (12 * scaleY);
+            firstPage.drawText(text, { x, y, size: 16 * scaleY, color: PDFLib.rgb(0, 0, 0) });
         }
 
-        // Process Signatures
         const sigs = pdfContainer.querySelectorAll('.signature-element img');
         for (const img of sigs) {
             const wrapper = img.parentElement;
             const imageBytes = await fetch(img.src).then(res => res.arrayBuffer());
             const pngImage = await pdfDoc.embedPng(imageBytes);
-            
-            const imgDims = pngImage.scale(0.5); // Default scaling
-            
-            // Adjust visual size to PDF size
-            // We need to match the visual aspect ratio to the PDF coordinates
             const visualWidth = img.offsetWidth;
             const visualHeight = img.offsetHeight;
-            
             const pdfImgWidth = visualWidth * scaleX;
             const pdfImgHeight = visualHeight * scaleY;
-
             const x = wrapper.offsetLeft * scaleX;
             const y = height - (wrapper.offsetTop * scaleY) - pdfImgHeight;
-
-            firstPage.drawImage(pngImage, {
-                x: x,
-                y: y,
-                width: pdfImgWidth,
-                height: pdfImgHeight,
-            });
+            firstPage.drawImage(pngImage, { x, y, width: pdfImgWidth, height: pdfImgHeight });
         }
 
         const modifiedPdfBytes = await pdfDoc.save();
-        return modifiedPdfBytes;
+        const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'signed-document.pdf';
+        a.click();
 
+        if (navigator.canShare && navigator.canShare({ files: [new File([blob], 'doc.pdf', { type: 'application/pdf' })] })) {
+            shareBtn.disabled = false;
+            shareBtn.onclick = () => sharePDF(blob);
+        }
     } catch (err) {
         console.error("Save error:", err);
-        alert("Error saving PDF.");
+        showError("Failed to save PDF.");
     }
 };
-
-saveBtn.addEventListener('click', async () => {
-    const bytes = await savePDF();
-    const blob = new Blob([bytes], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'signed-document.pdf';
-    a.click();
-    
-    // Enable share if supported
-    if (navigator.canShare && navigator.canShare({ files: [new File([blob], 'doc.pdf', { type: 'application/pdf' })] })) {
-        shareBtn.disabled = false;
-        shareBtn.onclick = () => sharePDF(blob);
-    }
-});
 
 const sharePDF = async (blob) => {
     const file = new File([blob], "signed.pdf", { type: "application/pdf" });
@@ -268,3 +291,4 @@ const sharePDF = async (blob) => {
         }
     }
 };
+saveBtn.addEventListener('click', savePDF);
