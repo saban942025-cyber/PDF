@@ -1,5 +1,4 @@
 // --- Configuration ---
-// Ensure worker matches the library version exactly
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 // --- DOM Elements ---
@@ -9,7 +8,9 @@ const saveBtn = document.getElementById('save-btn');
 const shareBtn = document.getElementById('share-btn');
 const addTextBtn = document.getElementById('add-text-btn');
 const addSigBtn = document.getElementById('add-sig-btn');
-const errorMsg = document.createElement('div'); // Dynamic error display
+
+// Error Handling Display
+const errorMsg = document.createElement('div');
 errorMsg.style.color = 'red';
 errorMsg.style.padding = '10px';
 errorMsg.style.textAlign = 'center';
@@ -25,14 +26,11 @@ const cancelSigBtn = document.getElementById('cancel-sig');
 
 // --- State ---
 let pdfDoc = null;
-let pdfBytes = null;
 let pageNum = 1;
 let scale = 1.5;
 let signaturePad = null;
 
 // --- Helpers ---
-
-// CRITICAL: Validate that the file is actually a PDF using "Magic Bytes"
 const validatePDFHeader = (uint8Array) => {
     if (uint8Array.length < 4) return false;
     // Check for %PDF (Hex: 25 50 44 46)
@@ -46,7 +44,6 @@ const showError = (msg) => {
     console.error(msg);
     errorMsg.textContent = `Error: ${msg}`;
     errorMsg.style.display = 'block';
-    // Hide pdf container on critical error
     pdfContainer.style.opacity = '0.5';
 };
 
@@ -74,7 +71,12 @@ const renderPDF = async (uint8Array) => {
             throw new Error("Invalid file format. The file does not have a valid '%PDF-' header.");
         }
 
-        // 2. Load in PDF.js (Visual)
+        // --- תיקון קריטי: יצירת עותק בטוח ---
+        // יוצרים עותק של המידע עבור ספריית העריכה (pdf-lib) *לפני* שמעבירים ל-pdf.js.
+        // pdf.js "מנתקת" את הזיכרון המקורי כשהיא מעבירה אותו ל-Worker.
+        const pdfBufferForEditor = uint8Array.slice(0);
+
+        // 2. Load in PDF.js (Visual) - This consumes the original buffer
         const loadingTask = pdfjsLib.getDocument({ 
             data: uint8Array,
             cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
@@ -85,6 +87,7 @@ const renderPDF = async (uint8Array) => {
         const page = await pdf.getPage(pageNum);
         const viewport = page.getViewport({ scale });
         
+        // Prepare Canvas
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
         canvas.height = viewport.height;
@@ -97,14 +100,15 @@ const renderPDF = async (uint8Array) => {
 
         await page.render({ canvasContext: context, viewport }).promise;
 
-        // 3. Load in PDF-Lib (Editing Logic)
-        // Pass a copy of the buffer to avoid detachment issues
-        pdfDoc = await PDFLib.PDFDocument.load(uint8Array.slice(0));
+        // 3. Load in PDF-Lib (Editing Logic) - Uses the safe COPY we made
+        pdfDoc = await PDFLib.PDFDocument.load(pdfBufferForEditor);
         
         // Enable UI
         saveBtn.disabled = false;
         addTextBtn.disabled = false;
         addSigBtn.disabled = false;
+        
+        // Store dimensions for saving logic
         pdfContainer.dataset.pdfWidth = viewport.width;
         pdfContainer.dataset.pdfHeight = viewport.height;
 
@@ -120,9 +124,8 @@ fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Basic MIME type check
     if (file.type !== 'application/pdf') {
-        showError("Selected file is not a PDF (MIME type mismatch).");
+        showError("Selected file is not a PDF.");
         return;
     }
 
@@ -131,27 +134,20 @@ fileInput.addEventListener('change', async (e) => {
     reader.onload = (ev) => {
         try {
             if (ev.target.result) {
-                // Ensure strictly Uint8Array
-                pdfBytes = new Uint8Array(ev.target.result);
-                renderPDF(pdfBytes);
-            } else {
-                throw new Error("File could not be read (empty result).");
+                const buffer = new Uint8Array(ev.target.result);
+                renderPDF(buffer);
             }
         } catch (err) {
-            showError("Failed to process file data: " + err.message);
+            showError("Failed to process file: " + err.message);
         }
     };
 
-    reader.onerror = () => showError("Error reading file from disk.");
+    reader.onerror = () => showError("Error reading file.");
     
-    // CRITICAL: Read as ArrayBuffer, NOT text
     reader.readAsArrayBuffer(file);
 });
 
 // --- UI Logic (Draggable, Saving, etc.) ---
-// ... (Keep existing draggable logic, it was fine) ...
-
-// Helper: Make element draggable
 const makeDraggable = (el) => {
     let isDragging = false;
     let startX, startY, initialLeft, initialTop;
@@ -185,6 +181,7 @@ const makeDraggable = (el) => {
     window.addEventListener('touchend', stopDrag);
 };
 
+// Add Text
 addTextBtn.addEventListener('click', () => {
     const div = document.createElement('div');
     div.className = 'draggable';
@@ -200,9 +197,10 @@ addTextBtn.addEventListener('click', () => {
     input.focus();
 });
 
+// Signature Handling
 addSigBtn.addEventListener('click', () => {
     sigModal.classList.remove('hidden');
-    initSignaturePad(); // Initialize only when needed
+    initSignaturePad();
     signaturePad.clear();
 });
 
@@ -225,17 +223,21 @@ confirmSigBtn.addEventListener('click', () => {
     sigModal.classList.add('hidden');
 });
 
+// Saving Logic
 const savePDF = async () => {
     try {
         if (!pdfDoc) return;
         const pages = pdfDoc.getPages();
         const firstPage = pages[0];
         const { width, height } = firstPage.getSize();
+        
         const renderedWidth = parseFloat(pdfContainer.dataset.pdfWidth);
         const renderedHeight = parseFloat(pdfContainer.dataset.pdfHeight);
+        
         const scaleX = width / renderedWidth;
         const scaleY = height / renderedHeight;
 
+        // Save Text
         const inputs = pdfContainer.querySelectorAll('.text-input');
         for (const input of inputs) {
             const wrapper = input.parentElement;
@@ -245,23 +247,28 @@ const savePDF = async () => {
             firstPage.drawText(text, { x, y, size: 16 * scaleY, color: PDFLib.rgb(0, 0, 0) });
         }
 
+        // Save Signatures
         const sigs = pdfContainer.querySelectorAll('.signature-element img');
         for (const img of sigs) {
             const wrapper = img.parentElement;
             const imageBytes = await fetch(img.src).then(res => res.arrayBuffer());
             const pngImage = await pdfDoc.embedPng(imageBytes);
+            
             const visualWidth = img.offsetWidth;
             const visualHeight = img.offsetHeight;
             const pdfImgWidth = visualWidth * scaleX;
             const pdfImgHeight = visualHeight * scaleY;
+            
             const x = wrapper.offsetLeft * scaleX;
             const y = height - (wrapper.offsetTop * scaleY) - pdfImgHeight;
+            
             firstPage.drawImage(pngImage, { x, y, width: pdfImgWidth, height: pdfImgHeight });
         }
 
         const modifiedPdfBytes = await pdfDoc.save();
         const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
+        
         const a = document.createElement('a');
         a.href = url;
         a.download = 'signed-document.pdf';
@@ -273,7 +280,7 @@ const savePDF = async () => {
         }
     } catch (err) {
         console.error("Save error:", err);
-        showError("Failed to save PDF.");
+        showError("Failed to save PDF: " + err.message);
     }
 };
 
@@ -291,4 +298,3 @@ const sharePDF = async (blob) => {
         }
     }
 };
-saveBtn.addEventListener('click', savePDF);
