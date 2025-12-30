@@ -4,15 +4,23 @@
     --danger: #e74c3c;
     --dark: #2c3e50;
     --light: #f5f6fa;
-    --shadow: 0 4px 6px rgba(0,0,0,0.1);
+    --shadow: 0 4px 6px rgba(0,0,0,0.3); /* צל מודגש יותר */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
 
-body { background: var(--light); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+body { 
+    background: var(--light); 
+    height: 100vh; 
+    /* תמיכה טובה יותר בגובה משתנה במובייל */
+    height: 100dvh; 
+    display: flex; 
+    flex-direction: column; 
+    overflow: hidden; 
+}
 
 header {
-    background: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: var(--shadow); z-index: 10;
+    background: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: var(--shadow); z-index: 500;
 }
 .logo { font-weight: bold; font-size: 1.2rem; color: var(--dark); }
 .actions { display: flex; gap: 10px; }
@@ -27,18 +35,20 @@ header {
 
 #workspace {
     flex: 1; overflow: auto; position: relative; display: flex; justify-content: center; padding: 20px; background: #e0e0e0;
+    /* ריווח מלמטה כדי שהתוכן לא יוסתר ע"י הכפתורים */
+    padding-bottom: 100px;
 }
 #pdf-container {
     position: relative; box-shadow: 0 0 20px rgba(0,0,0,0.2); background: white;
 }
 
-/* --- תיקון קריטי לגרירה בנייד --- */
+/* --- אלמנטים נגררים --- */
 .draggable {
     position: absolute; 
     cursor: move; 
     border: 2px dashed transparent; 
     z-index: 100; 
-    touch-action: none; /* מונע גלילת מסך בזמן גרירת האלמנט */
+    touch-action: none; /* קריטי לגרירה במובייל */
     user-select: none;
 }
 .draggable:hover, .draggable:focus-within {
@@ -49,36 +59,54 @@ header {
     display: block; 
     width: 100%; 
     height: auto; 
-    pointer-events: none; /* מאפשר גרירה דרך התמונה */
+    pointer-events: none; 
 }
 
-/* עיצוב תיבת הטקסט */
+/* תיבת טקסט */
 .text-input {
-    background: rgba(255, 255, 255, 0.8);
-    border: 1px solid #ccc;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid #333;
     font-size: 18px; 
     color: black; 
     outline: none; 
     min-width: 150px;
-    padding: 5px;
+    padding: 8px;
     direction: rtl; 
     text-align: right;
     border-radius: 4px;
 }
 
+/* --- כפתורים צפים (FAB) - התיקון הגדול --- */
 .fab-container {
-    position: absolute; bottom: 20px; left: 20px; display: flex; flex-direction: column-reverse; gap: 10px;
+    position: fixed; /* במקום absolute */
+    
+    /* חישוב מיקום חכם שמתחשב בפס הבית של אייפון */
+    bottom: calc(20px + env(safe-area-inset-bottom)); 
+    left: 20px; 
+    
+    display: flex; 
+    flex-direction: column-reverse; 
+    gap: 15px; /* רווח גדול יותר בין הכפתורים */
+    z-index: 1000; /* הכי גבוה שאפשר */
 }
+
 .fab {
-    width: 56px; height: 56px; border-radius: 50%; border: none; background: var(--dark); color: white;
-    font-size: 1.5rem; box-shadow: var(--shadow); cursor: pointer; display: flex; justify-content: center; align-items: center;
+    width: 60px; height: 60px; /* קצת יותר גדול לאצבע */
+    border-radius: 50%; border: none; background: var(--dark); color: white;
+    font-size: 1.8rem; box-shadow: 0 4px 10px rgba(0,0,0,0.3); 
+    cursor: pointer; display: flex; justify-content: center; align-items: center;
+    transition: transform 0.2s;
+    
+    /* מונע מהדפדפן לעשות זום בלחיצה כפולה בטעות */
+    touch-action: manipulation; 
 }
-.fab:disabled { background: #bdc3c7; }
+.fab:active { transform: scale(0.9); background: #34495e; }
+.fab:disabled { background: #bdc3c7; box-shadow: none; }
 
 /* Modal */
 .modal {
     position: fixed; top: 0; right: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 200;
+    background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 2000;
 }
 .hidden { display: none; }
 .modal-content {
@@ -89,3 +117,14 @@ header {
 }
 canvas#sig-canvas { width: 100%; height: 100%; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+@media (max-width: 600px) {
+    .actions .btn { font-size: 0.8rem; padding: 6px 10px; }
+    .logo { display: none; }
+    
+    /* הרחקה נוספת מהפינה במובייל למניעת פספוסים */
+    .fab-container {
+        left: 25px;
+        bottom: calc(30px + env(safe-area-inset-bottom));
+    }
+}
