@@ -1,8 +1,8 @@
 // --- הגדרות ---
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-// כתובת יציבה יותר לפונט עברית (דרך unpkg)
-const HEBREW_FONT_URL = 'https://unpkg.com/@fontsource/noto-sans-hebrew@5.0.1/files/noto-sans-hebrew-hebrew-400-normal.ttf';
+// הגדרת קובץ הפונט והחותמת
+const HEBREW_FONT_LOCAL = './NotoSansHebrew-Regular.ttf';
 const STAMP_IMAGE_URL = './sing.jpeg'; 
 
 // --- אלמנטים ---
@@ -13,9 +13,9 @@ const addTextBtn = document.getElementById('add-text-btn');
 const addSigBtn = document.getElementById('add-sig-btn');
 const addStampBtn = document.getElementById('add-stamp-btn');
 
-// הודעת שגיאה
+// --- הודעות שגיאה ---
 const errorMsg = document.createElement('div');
-errorMsg.style.cssText = 'color:white; background:#e74c3c; padding:10px; text-align:center; display:none; position:fixed; top:0; width:100%; z-index:999; font-weight:bold; direction:rtl;';
+errorMsg.style.cssText = 'color:white; background:#e74c3c; padding:10px; text-align:center; display:none; position:fixed; top:0; width:100%; z-index:9999; font-weight:bold; direction:rtl;';
 document.body.prepend(errorMsg);
 
 const sigModal = document.getElementById('signature-modal');
@@ -29,34 +29,38 @@ let pdfDoc = null;
 let pageNum = 1;
 let scale = 1.5;
 let signaturePad = null;
-let hebrewFontBytes = null;
+let hebrewFontBytes = null; // ישמור את הפונט אם הצלחנו לטעון
 
-// --- פונקציות עזר ---
-const showError = (msg) => {
-    console.error(msg); errorMsg.innerText = msg; errorMsg.style.display = 'block';
+// פונקציית עזר להצגת שגיאות
+const showError = (msg, isCritical = false) => {
+    console.error(msg);
+    errorMsg.innerText = msg;
+    errorMsg.style.display = 'block';
+    errorMsg.style.background = isCritical ? '#e74c3c' : '#f39c12'; // כתום לאזהרה, אדום לקריטי
     setTimeout(() => errorMsg.style.display = 'none', 5000);
 };
 
-// טעינת פונט משופרת
-const fetchHebrewFont = async () => {
-    if (hebrewFontBytes) return;
+// --- טעינת פונט בטוחה (Fail-Safe) ---
+const loadFontSafe = async () => {
+    if (hebrewFontBytes) return true; // כבר נטען
+    
     try {
-        console.log('מתחיל להוריד פונט עברית...');
-        const res = await fetch(HEBREW_FONT_URL);
-        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        console.log(`מנסה לטעון פונט מ: ${HEBREW_FONT_LOCAL}`);
+        // הוספנו time stamp כדי למנוע מהדפדפן לשמור גרסה ישנה שגויה
+        const res = await fetch(`${HEBREW_FONT_LOCAL}?v=${new Date().getTime()}`);
+        
+        if (!res.ok) throw new Error(`קובץ לא נמצא (${res.status})`);
         
         const buffer = await res.arrayBuffer();
+        if (buffer.byteLength < 1000) throw new Error("קובץ פונט ריק או פגום");
         
-        // בדיקת תקינות הקובץ (פונט אמיתי צריך לשקול יותר מ-1KB)
-        if (buffer.byteLength < 1000) {
-            throw new Error("קובץ הפונט שהתקבל פגום או קטן מדי.");
-        }
-
         hebrewFontBytes = buffer;
-        console.log('פונט עברית נטען בהצלחה. גודל:', buffer.byteLength);
-    } catch (e) { 
-        console.warn('נכשל בטעינת הפונט:', e);
-        showError('שגיאה: אינטרנט לא זמין או חסימה בטעינת הפונט. העברית לא תישמר.');
+        console.log("פונט עברית נטען בהצלחה!");
+        return true;
+    } catch (e) {
+        console.warn("כישלון בטעינת פונט עברית:", e);
+        showError("שים לב: הפונט בעברית חסר. ניתן לשמור, אך עברית תוצג כריבועים.", false);
+        return false;
     }
 };
 
@@ -72,12 +76,12 @@ const initSignaturePad = () => {
 // --- טעינת PDF ---
 const renderPDF = async (buffer) => {
     try {
-        // ניסיון טעינת פונט מיידי
-        fetchHebrewFont();
+        // מנסים לטעון פונט, אבל לא עוצרים אם נכשל
+        loadFontSafe();
 
         const pdfCopy = buffer.slice(0);
 
-        // תצוגה
+        // תצוגה (PDF.js)
         const loadingTask = pdfjsLib.getDocument({ data: buffer, cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/', cMapPacked: true });
         const pdf = await loadingTask.promise;
         const page = await pdf.getPage(pageNum);
@@ -91,16 +95,17 @@ const renderPDF = async (buffer) => {
         pdfContainer.innerHTML = ''; pdfContainer.appendChild(canvas);
         await page.render({ canvasContext: context, viewport }).promise;
 
-        // עריכה
+        // עריכה (PDF-Lib)
         pdfDoc = await PDFLib.PDFDocument.load(pdfCopy);
         if (typeof fontkit !== 'undefined') pdfDoc.registerFontkit(fontkit);
         
         // שחרור כפתורים
         [saveBtn, addTextBtn, addSigBtn, addStampBtn].forEach(btn => btn.disabled = false);
         
-        pdfContainer.dataset.pdfWidth = viewport.width; pdfContainer.dataset.pdfHeight = viewport.height;
+        pdfContainer.dataset.pdfWidth = viewport.width; 
+        pdfContainer.dataset.pdfHeight = viewport.height;
 
-    } catch (err) { showError("שגיאה בטעינת הקובץ: " + err.message); }
+    } catch (err) { showError("שגיאה קריטית בטעינת הקובץ: " + err.message, true); }
 };
 
 fileInput.addEventListener('change', (e) => {
@@ -110,20 +115,19 @@ fileInput.addEventListener('change', (e) => {
         reader.onload = (ev) => renderPDF(new Uint8Array(ev.target.result));
         reader.readAsArrayBuffer(file);
     } else {
-        showError("נא לבחור קובץ PDF.");
+        showError("נא לבחור קובץ PDF תקין.", true);
     }
 });
 
-// --- גרירה ושינוי גודל ---
+// --- גרירה ---
 const makeDraggable = (el) => {
     let isDragging = false; let startX, startY, initialLeft, initialTop;
     
-    // מחיקה
-    el.addEventListener('dblclick', () => { if (confirm('למחוק פריט זה?')) el.remove(); });
-
-    // שינוי גודל לתמונות
+    el.addEventListener('dblclick', () => { if (confirm('למחוק?')) el.remove(); });
+    
+    // שינוי גודל תמונה
     if (el.querySelector('img')) {
-        el.addEventListener('click', (e) => {
+        el.addEventListener('click', () => {
             if (isDragging) return;
             const img = el.querySelector('img');
             const w = img.offsetWidth;
@@ -137,7 +141,6 @@ const makeDraggable = (el) => {
         startX = e.clientX || e.touches[0].clientX; startY = e.clientY || e.touches[0].clientY;
         initialLeft = el.offsetLeft; initialTop = el.offsetTop;
     };
-
     const doDrag = (e) => {
         if (!isDragging) return;
         e.preventDefault();
@@ -145,7 +148,6 @@ const makeDraggable = (el) => {
         el.style.left = `${initialLeft + (currentX - startX)}px`;
         el.style.top = `${initialTop + (currentY - startY)}px`;
     };
-
     const stopDrag = () => { setTimeout(() => isDragging = false, 100); };
 
     el.addEventListener('mousedown', startDrag); el.addEventListener('touchstart', startDrag, {passive: false});
@@ -153,19 +155,19 @@ const makeDraggable = (el) => {
     window.addEventListener('mouseup', stopDrag); window.addEventListener('touchend', stopDrag);
 };
 
-// --- הוספת אלמנטים ---
+// --- כפתורים ---
 addTextBtn.addEventListener('click', () => {
     const div = document.createElement('div'); div.className = 'draggable text-wrapper';
     div.style.top = '100px'; div.style.left = '50px';
     const input = document.createElement('input');
-    input.className = 'text-input'; input.value = 'טקסט כאן'; input.type = 'text';
+    input.className = 'text-input'; input.value = 'טקסט';
     div.appendChild(input); pdfContainer.appendChild(div); makeDraggable(div); input.focus();
 });
 
 addStampBtn.addEventListener('click', () => {
     const img = document.createElement('img');
     img.src = STAMP_IMAGE_URL; img.dataset.type = 'jpeg'; img.style.width = '100px';
-    img.onerror = () => showError(`קובץ החותמת ${STAMP_IMAGE_URL} לא נמצא.`);
+    img.onerror = () => showError("קובץ החותמת sing.jpeg חסר.", false);
     const div = document.createElement('div'); div.className = 'draggable img-wrapper';
     div.style.top = '150px'; div.style.left = '100px';
     div.appendChild(img); pdfContainer.appendChild(div); makeDraggable(div);
@@ -184,35 +186,32 @@ confirmSigBtn.addEventListener('click', () => {
     sigModal.classList.add('hidden');
 });
 
-// --- שמירה ושיתוף ---
+// --- שמירה ושיתוף (מנגנון יציב) ---
 saveBtn.addEventListener('click', async () => {
     if (!pdfDoc) return;
-    saveBtn.innerText = 'מכין שמירה...'; saveBtn.disabled = true;
+    saveBtn.innerText = 'שומר...'; saveBtn.disabled = true;
     
     try {
-        // 1. ווידוא קריטי שהפונט קיים
-        if (!hebrewFontBytes) {
-             await fetchHebrewFont();
-             // אם עדיין אין פונט, זרוק שגיאה ברורה
-             if (!hebrewFontBytes) {
-                 throw new Error("לא ניתן לשמור: הפונט בעברית לא ירד למכשיר. בדוק חיבור אינטרנט ונסה שוב.");
-             }
-        }
-
-        // 2. הטמעת הפונט
-        let customFont;
-        try {
-            customFont = await pdfDoc.embedFont(hebrewFontBytes, { subset: true });
-        } catch (e) {
-            throw new Error("הטמעת הפונט בקובץ נכשלה. הקובץ כנראה פגום.");
-        }
-        
         const page = pdfDoc.getPages()[0];
         const { width, height } = page.getSize();
         const scaleX = width / parseFloat(pdfContainer.dataset.pdfWidth);
         const scaleY = height / parseFloat(pdfContainer.dataset.pdfHeight);
 
-        // 3. שמירת טקסט
+        // ניסיון להטמיע פונט
+        let customFont = null;
+        if (hebrewFontBytes) {
+            try {
+                customFont = await pdfDoc.embedFont(hebrewFontBytes, { subset: true });
+            } catch (e) { console.warn("הטמעת פונט נכשלה, עובר לברירת מחדל"); }
+        }
+
+        // אם אין פונט עברית, נשתמש בפונט סטנדרטי (אנגלית בלבד)
+        // זה מונע קריסה, גם אם העברית לא תעבוד
+        if (!customFont) {
+            customFont = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+        }
+
+        // שמירת טקסט
         const textInputs = document.querySelectorAll('.text-input');
         for (const input of textInputs) {
             const val = input.value;
@@ -225,13 +224,13 @@ saveBtn.addEventListener('click', async () => {
             page.drawText(val, { 
                 x, y, 
                 size: 18 * scaleY, 
-                font: customFont, // כאן השימוש בפונט הוא קריטי
-                color: PDFLib.rgb(0,0,0), 
-                features: { rtl: true } 
+                font: customFont,
+                color: PDFLib.rgb(0,0,0),
+                features: { rtl: true } // ינסה ליישר, יעבוד רק עם הפונט העברי
             });
         }
 
-        // 4. שמירת תמונות
+        // שמירת תמונות
         const images = document.querySelectorAll('.draggable img');
         for (const img of images) {
             const wrapper = img.parentElement;
@@ -254,7 +253,7 @@ saveBtn.addEventListener('click', async () => {
         }
 
     } catch (e) { 
-        showError("שגיאה: " + e.message); 
+        showError("שגיאה בשמירה: " + e.message, true); 
     } finally { 
         saveBtn.innerText = 'שמור ושתף'; saveBtn.disabled = false; 
     }
