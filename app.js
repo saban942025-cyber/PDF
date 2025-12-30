@@ -34,7 +34,6 @@ let signaturePad = null;
 // --- Helpers ---
 const validatePDFHeader = (uint8Array) => {
     if (uint8Array.length < 4) return false;
-    // בדיקת "מספרי קסם" של PDF (%PDF)
     return uint8Array[0] === 0x25 && 
            uint8Array[1] === 0x50 && 
            uint8Array[2] === 0x44 && 
@@ -43,7 +42,7 @@ const validatePDFHeader = (uint8Array) => {
 
 const showError = (msg) => {
     console.error(msg);
-    errorMsg.textContent = `Error: ${msg}`;
+    errorMsg.textContent = `שגיאה: ${msg}`;
     errorMsg.style.display = 'block';
     pdfContainer.style.opacity = '0.5';
 };
@@ -67,18 +66,16 @@ const initSignaturePad = () => {
 const renderPDF = async (originalBuffer) => {
     clearError();
     try {
-        // 1. בדיקת תקינות הקובץ
         if (!validatePDFHeader(originalBuffer)) {
-            throw new Error("קובץ לא תקין: לא נמצאה כותרת PDF.");
+            throw new Error("קובץ לא תקין או פגום.");
         }
 
-        // 2. שכפול הזיכרון (CRITICAL FIX)
-        // חייבים לשכפל את המידע *לפני* ש-pdf.js נוגע בו, כי הוא מוחק את המקור.
+        // שכפול הזיכרון (חשוב מאוד ליציבות)
         const pdfCopy = originalBuffer.slice(0); 
 
-        // 3. טעינה לתצוגה (PDF.js) - משתמש במקור (והורס אותו)
+        // טעינה ויזואלית (PDF.js)
         const loadingTask = pdfjsLib.getDocument({ 
-            data: originalBuffer, // מעבירים את המקור
+            data: originalBuffer, 
             cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
             cMapPacked: true
         });
@@ -100,15 +97,15 @@ const renderPDF = async (originalBuffer) => {
 
         await page.render({ canvasContext: context, viewport }).promise;
 
-        // 4. טעינה לעריכה (PDF-Lib) - משתמש בהעתק שיצרנו קודם
+        // טעינה לעריכה (PDF-Lib)
         pdfDoc = await PDFLib.PDFDocument.load(pdfCopy);
         
-        // שחרור כפתורים
+        // שחרור כפתורים - כאן הם הופכים ללחיצים
         saveBtn.disabled = false;
         addTextBtn.disabled = false;
         addSigBtn.disabled = false;
         
-        // שמירת מידות לחישובי מיקום
+        // שמירת מידות
         pdfContainer.dataset.pdfWidth = viewport.width;
         pdfContainer.dataset.pdfHeight = viewport.height;
 
@@ -130,25 +127,16 @@ fileInput.addEventListener('change', async (e) => {
     }
 
     const reader = new FileReader();
-    
     reader.onload = (ev) => {
-        try {
-            if (ev.target.result) {
-                // המרה ל-Uint8Array
-                const buffer = new Uint8Array(ev.target.result);
-                renderPDF(buffer);
-            }
-        } catch (err) {
-            showError("שגיאה בקריאת הקובץ: " + err.message);
+        if (ev.target.result) {
+            const buffer = new Uint8Array(ev.target.result);
+            renderPDF(buffer);
         }
     };
-
-    reader.onerror = () => showError("שגיאה בטעינת הקובץ מהדיסק.");
-    
     reader.readAsArrayBuffer(file);
 });
 
-// --- UI Logic (גרירה, הוספה ושמירה) ---
+// --- UI Logic ---
 const makeDraggable = (el) => {
     let isDragging = false;
     let startX, startY, initialLeft, initialTop;
@@ -182,7 +170,7 @@ const makeDraggable = (el) => {
     window.addEventListener('touchend', stopDrag);
 };
 
-// הוספת טקסט
+// הוספת אלמנטים
 addTextBtn.addEventListener('click', () => {
     const div = document.createElement('div');
     div.className = 'draggable';
@@ -190,15 +178,12 @@ addTextBtn.addEventListener('click', () => {
     div.style.left = '50px';
     const input = document.createElement('input');
     input.className = 'text-input';
-    input.value = 'טקסט כאן';
-    input.type = 'text';
+    input.value = 'טקסט';
     div.appendChild(input);
     pdfContainer.appendChild(div);
     makeDraggable(div);
-    input.focus();
 });
 
-// חתימה
 addSigBtn.addEventListener('click', () => {
     sigModal.classList.remove('hidden');
     initSignaturePad();
@@ -224,79 +209,87 @@ confirmSigBtn.addEventListener('click', () => {
     sigModal.classList.add('hidden');
 });
 
-// שמירת ה-PDF
-const savePDF = async () => {
+// --- שמירה ושיתוף (הלוגיקה המשופרת) ---
+saveBtn.addEventListener('click', async () => {
+    if (!pdfDoc) return;
+    
+    // חיווי למשתמש שהתהליך התחיל
+    saveBtn.innerText = 'מעבד...';
+    
     try {
-        if (!pdfDoc) return;
         const pages = pdfDoc.getPages();
         const firstPage = pages[0];
         const { width, height } = firstPage.getSize();
         
         const renderedWidth = parseFloat(pdfContainer.dataset.pdfWidth);
         const renderedHeight = parseFloat(pdfContainer.dataset.pdfHeight);
-        
         const scaleX = width / renderedWidth;
         const scaleY = height / renderedHeight;
 
-        // שמירת טקסטים
+        // הטמעת טקסט
         const inputs = pdfContainer.querySelectorAll('.text-input');
         for (const input of inputs) {
             const wrapper = input.parentElement;
             const text = input.value;
             const x = wrapper.offsetLeft * scaleX;
-            // תיקון מיקום Y (קואורדינטות PDF הן מלמטה למעלה)
             const y = height - (wrapper.offsetTop * scaleY) - (12 * scaleY);
             firstPage.drawText(text, { x, y, size: 16 * scaleY, color: PDFLib.rgb(0, 0, 0) });
         }
 
-        // שמירת חתימות
+        // הטמעת חתימות
         const sigs = pdfContainer.querySelectorAll('.signature-element img');
         for (const img of sigs) {
             const wrapper = img.parentElement;
             const imageBytes = await fetch(img.src).then(res => res.arrayBuffer());
             const pngImage = await pdfDoc.embedPng(imageBytes);
-            
-            const visualWidth = img.offsetWidth;
-            const visualHeight = img.offsetHeight;
-            const pdfImgWidth = visualWidth * scaleX;
-            const pdfImgHeight = visualHeight * scaleY;
-            
             const x = wrapper.offsetLeft * scaleX;
+            const pdfImgHeight = img.offsetHeight * scaleY;
             const y = height - (wrapper.offsetTop * scaleY) - pdfImgHeight;
             
-            firstPage.drawImage(pngImage, { x, y, width: pdfImgWidth, height: pdfImgHeight });
+            firstPage.drawImage(pngImage, { 
+                x, y, 
+                width: img.offsetWidth * scaleX, 
+                height: pdfImgHeight 
+            });
         }
 
         const modifiedPdfBytes = await pdfDoc.save();
         const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'signed-document.pdf';
-        a.click();
+        const file = new File([blob], "signed_document.pdf", { type: "application/pdf" });
 
-        if (navigator.canShare && navigator.canShare({ files: [new File([blob], 'doc.pdf', { type: 'application/pdf' })] })) {
-            shareBtn.disabled = false;
-            shareBtn.onclick = () => sharePDF(blob);
+        // ניסיון שיתוף (מועדף במובייל)
+        if (navigator.share && navigator.canShare({ files: [file] })) {
+            try {
+                await navigator.share({
+                    files: [file],
+                    title: 'מסמך חתום',
+                    text: 'מצורף המסמך החתום.'
+                });
+                saveBtn.innerText = 'נשלח בהצלחה!';
+            } catch (err) {
+                console.log('Share canceled/failed', err);
+                // אם השיתוף נכשל או בוטל, ננסה להוריד רגיל
+                downloadFile(blob);
+            }
+        } else {
+            // הורדה רגילה במחשב
+            downloadFile(blob);
         }
+
     } catch (err) {
-        console.error("Save error:", err);
-        showError("שגיאה בשמירה: " + err.message);
+        alert("שגיאה בשמירה: " + err.message);
+    } finally {
+        setTimeout(() => saveBtn.innerText = 'Save & Download', 2000);
     }
-};
+});
 
-const sharePDF = async (blob) => {
-    const file = new File([blob], "signed.pdf", { type: "application/pdf" });
-    if (navigator.share) {
-        try {
-            await navigator.share({
-                title: 'Signed PDF',
-                text: 'הנה המסמך החתום.',
-                files: [file]
-            });
-        } catch (err) {
-            console.error('Share failed', err);
-        }
-    }
+const downloadFile = (blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'signed_document.pdf';
+    document.body.appendChild(a); // נדרש לפעמים בפיירפוקס
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 };
