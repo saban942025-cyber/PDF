@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PDF Signer PWA</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4a90e2">
+    <link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+
+    <header>
+        <div class="logo">✍️ PDF Signer</div>
+        <div class="actions">
+            <label for="file-upload" class="btn primary">
+                Upload PDF
+                <input type="file" id="file-upload" accept="application/pdf" hidden>
+            </label>
+            <button id="save-btn" class="btn success" disabled>Save & Download</button>
+            <button id="share-btn" class="btn secondary" disabled>Share</button>
+        </div>
+    </header>
+
+    <main id="workspace">
+        <div id="pdf-container">
+            <div id="no-file-msg">Please upload a PDF to start editing.</div>
+            </div>
+    </main>
+
+    <div class="fab-container">
+        <button id="add-text-btn" class="fab" disabled title="Add Text">T</button>
+        <button id="add-sig-btn" class="fab" disabled title="Add Signature">✒️</button>
+    </div>
+
+    <div id="signature-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Draw Signature</h3>
+            <div class="canvas-wrapper">
+                <canvas id="sig-canvas"></canvas>
+            </div>
+            <div class="modal-actions">
+                <button id="clear-sig" class="btn danger">Clear</button>
+                <button id="cancel-sig" class="btn secondary">Cancel</button>
+                <button id="confirm-sig" class="btn success">Add Signature</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
+    
+    <script>
+        // PDF.js worker setup
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <script src="app.js"></script>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./service-worker.js')
+                .then(reg => console.log('SW Registered!', reg))
+                .catch(err => console.error('SW Error', err));
+        }
+    </script>
+</body>
+</html>
