@@ -1,22 +1,21 @@
 <!DOCTYPE html>
-<html lang="he" dir="rtl">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>החתמת PDF</title>
+    <title>Saban PDF Signer</title>
     <link rel="stylesheet" href="style.css">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/png" href="icon-192.png">
     <meta name="theme-color" content="#4a90e2">
-    <link rel="apple-touch-icon" href="icon-192.png">
 </head>
 <body>
 
     <header>
-        <div class="logo">✍️ החתמת מסמכים</div>
+        <div class="logo">✍️ Saban PDF</div>
         <div class="actions">
             <label for="file-upload" class="btn primary">
-                בחר PDF
+                פתח PDF
                 <input type="file" id="file-upload" accept="application/pdf" hidden>
             </label>
             <button id="save-btn" class="btn success" disabled>שמור ושתף</button>
@@ -25,37 +24,48 @@
 
     <main id="workspace">
         <div id="pdf-container">
-            <div id="no-file-msg">אנא בחר קובץ PDF כדי להתחיל.</div>
+            <div id="no-file-msg">נא לטעון קובץ PDF</div>
         </div>
     </main>
 
     <div class="fab-container">
-        <button id="add-text-btn" class="fab" disabled title="הוסף הערה">T</button>
-        <button id="add-sig-btn" class="fab" disabled title="צייר חתימה">✒️</button>
-        <button id="add-stamp-btn" class="fab" disabled title="הוסף חותמת תמונה">📷</button>
+        <button id="add-text-btn" class="fab" disabled title="הוסף טקסט">T</button>
+        <button id="add-sig-btn" class="fab" disabled title="הוסף חתימה">✒️</button>
+        <button id="add-stamp-btn" class="fab" disabled title="הוסף חותמת">📷</button>
     </div>
 
     <div id="signature-modal" class="modal hidden">
         <div class="modal-content">
-            <h3>צייר חתימה</h3>
+            <h3>חתימה</h3>
             <div class="canvas-wrapper">
                 <canvas id="sig-canvas"></canvas>
             </div>
             <div class="modal-actions">
                 <button id="clear-sig" class="btn danger">נקה</button>
                 <button id="cancel-sig" class="btn secondary">ביטול</button>
-                <button id="confirm-sig" class="btn success">הוסף</button>
+                <button id="confirm-sig" class="btn success">אשר</button>
             </div>
         </div>
-    </header>
+    </div>
 
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
     <script src="https://unpkg.com/@pdf-lib/fontkit/dist/fontkit.umd.js"></script>
-    
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
     <script src="app.js"></script>
 
-
+    <script>
+        // מחיקת Cache ישן כדי שהעדכון ייתפס
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                for(let registration of registrations) { registration.unregister(); }
+            });
+            navigator.serviceWorker.register('./service-worker.js');
+        }
+    </script>
 </body>
 </html>
