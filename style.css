@@ -1,129 +1,97 @@
-/* --- style.css --- */
 :root {
-    --primary: #4a90e2;
-    --success: #2ecc71;
-    --danger: #e74c3c;
-    --dark: #2c3e50;
-    --light: #f5f6fa;
-    --shadow: 0 4px 6px rgba(0,0,0,0.3);
+    --primary: #4a90e2; --success: #2ecc71; --danger: #e74c3c; --dark: #2c3e50; --light: #f5f6fa;
 }
-
-* { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
 
 body { 
     background: var(--light); 
+    height: 100vh; 
+    /* תמיכה טובה יותר בגובה בניידים */
     height: 100dvh; 
     display: flex; 
     flex-direction: column; 
     overflow: hidden; 
 }
 
-header {
-    background: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: var(--shadow); z-index: 500;
+header { 
+    background: white; padding: 10px; display: flex; justify-content: space-between; align-items: center; 
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1); z-index: 500; 
 }
-.logo { font-weight: bold; font-size: 1.2rem; color: var(--dark); }
-.actions { display: flex; gap: 10px; }
-
-.btn {
-    border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: 0.2s; color: white; display: inline-block;
-}
+.actions { display: flex; gap: 8px; }
+.btn { border: none; padding: 8px 12px; border-radius: 5px; color: white; cursor: pointer; font-size: 0.9rem; }
 .btn.primary { background: var(--primary); }
 .btn.success { background: var(--success); }
-.btn.secondary { background: #95a5a6; }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn:disabled { opacity: 0.5; }
 
+/* איזור העבודה הראשי - מאפשר גלילה */
 #workspace {
-    flex: 1; 
-    overflow-y: auto; /* גלילה אנכית */
-    overflow-x: hidden;
-    position: relative; 
-    background: #e0e0e0;
-    padding: 20px 0; /* מרווח מלמעלה למטה */
-    padding-bottom: 120px; /* מקום לכפתורים צפים */
+    flex: 1;
+    overflow-y: auto; /* מאפשר גלילה אנכית */
+    -webkit-overflow-scrolling: touch; /* גלילה חלקה באייפון */
+    position: relative;
+    background: #ccc;
+    padding-bottom: 120px; /* מקום לכפתורים למטה */
+    text-align: center;
+    touch-action: pan-y; /* מאפשר לדפדפן לגלול את הדף */
+}
+
+#pdf-container {
+    padding-top: 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 20px; /* רווח בין עמודים */
 }
 
-/* עיצוב כל עמוד בנפרד */
-.pdf-page {
-    position: relative; 
-    box-shadow: 0 2px 10px rgba(0,0,0,0.2); 
+/* דפים */
+.page-wrapper {
+    position: relative;
     background: white;
-    margin-bottom: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 
-.pdf-page canvas {
-    display: block;
-    width: 100%;
-    height: auto;
-}
-
-/* אלמנטים נגררים - קריטי למובייל */
+/* אלמנטים נגררים */
 .draggable {
-    position: absolute; 
-    cursor: move; 
-    border: 2px dashed transparent; 
-    z-index: 100; 
+    position: absolute;
+    z-index: 100;
+    cursor: move;
+    border: 1px dashed transparent;
+    /* מונע גלילה של הדף רק כשנוגעים באלמנט עצמו */
     touch-action: none; 
-    user-select: none;
 }
-.draggable:hover, .draggable:focus-within {
-    border: 2px dashed var(--primary); 
-    background: rgba(74, 144, 226, 0.1);
-}
-.draggable img { 
-    display: block; width: 100%; height: auto; pointer-events: none; 
+.draggable:hover, .draggable:focus-within { 
+    border: 1px dashed blue; 
+    background: rgba(0, 0, 255, 0.05);
 }
 
-.text-input {
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid #333;
-    font-size: 16px; 
-    color: black; 
-    outline: none; 
-    min-width: 100px;
-    padding: 5px;
-    direction: rtl; 
-    text-align: right;
-    border-radius: 4px;
+.text-input { 
+    background: rgba(255,255,255,0.9); border: 1px solid #333; padding: 5px; font-size: 16px; min-width: 100px; direction: rtl; border-radius: 4px;
 }
 
 /* כפתורים צפים */
 .fab-container {
-    position: fixed; 
+    position: fixed;
+    /* חישוב מיקום בטוח מעל הבר התחתון של האייפון */
     bottom: calc(20px + env(safe-area-inset-bottom)); 
-    left: 20px; 
-    display: flex; 
-    flex-direction: column-reverse; 
-    gap: 15px; 
-    z-index: 1000;
+    left: 20px;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 15px;
+    z-index: 9999;
 }
-
 .fab {
-    width: 60px; height: 60px; border-radius: 50%; border: none; background: var(--dark); color: white;
-    font-size: 1.8rem; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer; display: flex; justify-content: center; align-items: center;
-    transition: transform 0.2s; touch-action: manipulation;
+    width: 60px; height: 60px; border-radius: 50%; border: none; background: var(--dark); color: white; font-size: 24px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
 }
-.fab:active { transform: scale(0.9); }
-.fab:disabled { background: #bdc3c7; box-shadow: none; }
 
-.modal {
-    position: fixed; top: 0; right: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 2000;
-}
+/* מודל */
+.modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 10000; }
 .hidden { display: none; }
-.modal-content {
-    background: white; padding: 20px; border-radius: 8px; width: 90%; max-width: 500px; text-align: right;
-}
-.canvas-wrapper {
-    border: 1px solid #ccc; height: 200px; margin: 15px 0; background: #fff; touch-action: none;
-}
-canvas#sig-canvas { width: 100%; height: 100%; }
+.modal-content { background: white; padding: 20px; width: 90%; max-width: 400px; border-radius: 8px; }
+.canvas-wrapper { border: 1px solid #ddd; height: 200px; margin: 10px 0; background: white; touch-action: none; }
+canvas { width: 100%; height: 100%; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
 @media (max-width: 600px) {
-    .actions .btn { font-size: 0.8rem; padding: 6px 10px; }
     .logo { display: none; }
 }
