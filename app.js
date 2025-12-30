@@ -1,4 +1,5 @@
 // --- Configuration ---
+// הגדרת ה-Worker של PDF.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 // --- DOM Elements ---
@@ -9,7 +10,7 @@ const shareBtn = document.getElementById('share-btn');
 const addTextBtn = document.getElementById('add-text-btn');
 const addSigBtn = document.getElementById('add-sig-btn');
 
-// Error Handling Display
+// יצירת אלמנט להצגת שגיאות
 const errorMsg = document.createElement('div');
 errorMsg.style.color = 'red';
 errorMsg.style.padding = '10px';
@@ -33,7 +34,7 @@ let signaturePad = null;
 // --- Helpers ---
 const validatePDFHeader = (uint8Array) => {
     if (uint8Array.length < 4) return false;
-    // Check for %PDF (Hex: 25 50 44 46)
+    // בדיקת "מספרי קסם" של PDF (%PDF)
     return uint8Array[0] === 0x25 && 
            uint8Array[1] === 0x50 && 
            uint8Array[2] === 0x44 && 
@@ -63,22 +64,21 @@ const initSignaturePad = () => {
 };
 
 // --- PDF Rendering ---
-const renderPDF = async (uint8Array) => {
+const renderPDF = async (originalBuffer) => {
     clearError();
     try {
-        // 1. Validate Header
-        if (!validatePDFHeader(uint8Array)) {
-            throw new Error("Invalid file format. The file does not have a valid '%PDF-' header.");
+        // 1. בדיקת תקינות הקובץ
+        if (!validatePDFHeader(originalBuffer)) {
+            throw new Error("קובץ לא תקין: לא נמצאה כותרת PDF.");
         }
 
-        // --- תיקון קריטי: יצירת עותק בטוח ---
-        // יוצרים עותק של המידע עבור ספריית העריכה (pdf-lib) *לפני* שמעבירים ל-pdf.js.
-        // pdf.js "מנתקת" את הזיכרון המקורי כשהיא מעבירה אותו ל-Worker.
-        const pdfBufferForEditor = uint8Array.slice(0);
+        // 2. שכפול הזיכרון (CRITICAL FIX)
+        // חייבים לשכפל את המידע *לפני* ש-pdf.js נוגע בו, כי הוא מוחק את המקור.
+        const pdfCopy = originalBuffer.slice(0); 
 
-        // 2. Load in PDF.js (Visual) - This consumes the original buffer
+        // 3. טעינה לתצוגה (PDF.js) - משתמש במקור (והורס אותו)
         const loadingTask = pdfjsLib.getDocument({ 
-            data: uint8Array,
+            data: originalBuffer, // מעבירים את המקור
             cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
             cMapPacked: true
         });
@@ -87,7 +87,7 @@ const renderPDF = async (uint8Array) => {
         const page = await pdf.getPage(pageNum);
         const viewport = page.getViewport({ scale });
         
-        // Prepare Canvas
+        // הכנת הקנבס
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
         canvas.height = viewport.height;
@@ -100,15 +100,15 @@ const renderPDF = async (uint8Array) => {
 
         await page.render({ canvasContext: context, viewport }).promise;
 
-        // 3. Load in PDF-Lib (Editing Logic) - Uses the safe COPY we made
-        pdfDoc = await PDFLib.PDFDocument.load(pdfBufferForEditor);
+        // 4. טעינה לעריכה (PDF-Lib) - משתמש בהעתק שיצרנו קודם
+        pdfDoc = await PDFLib.PDFDocument.load(pdfCopy);
         
-        // Enable UI
+        // שחרור כפתורים
         saveBtn.disabled = false;
         addTextBtn.disabled = false;
         addSigBtn.disabled = false;
         
-        // Store dimensions for saving logic
+        // שמירת מידות לחישובי מיקום
         pdfContainer.dataset.pdfWidth = viewport.width;
         pdfContainer.dataset.pdfHeight = viewport.height;
 
@@ -125,7 +125,7 @@ fileInput.addEventListener('change', async (e) => {
     if (!file) return;
 
     if (file.type !== 'application/pdf') {
-        showError("Selected file is not a PDF.");
+        showError("נא לבחור קובץ PDF בלבד.");
         return;
     }
 
@@ -134,20 +134,21 @@ fileInput.addEventListener('change', async (e) => {
     reader.onload = (ev) => {
         try {
             if (ev.target.result) {
+                // המרה ל-Uint8Array
                 const buffer = new Uint8Array(ev.target.result);
                 renderPDF(buffer);
             }
         } catch (err) {
-            showError("Failed to process file: " + err.message);
+            showError("שגיאה בקריאת הקובץ: " + err.message);
         }
     };
 
-    reader.onerror = () => showError("Error reading file.");
+    reader.onerror = () => showError("שגיאה בטעינת הקובץ מהדיסק.");
     
     reader.readAsArrayBuffer(file);
 });
 
-// --- UI Logic (Draggable, Saving, etc.) ---
+// --- UI Logic (גרירה, הוספה ושמירה) ---
 const makeDraggable = (el) => {
     let isDragging = false;
     let startX, startY, initialLeft, initialTop;
@@ -181,7 +182,7 @@ const makeDraggable = (el) => {
     window.addEventListener('touchend', stopDrag);
 };
 
-// Add Text
+// הוספת טקסט
 addTextBtn.addEventListener('click', () => {
     const div = document.createElement('div');
     div.className = 'draggable';
@@ -189,7 +190,7 @@ addTextBtn.addEventListener('click', () => {
     div.style.left = '50px';
     const input = document.createElement('input');
     input.className = 'text-input';
-    input.value = 'Text Here';
+    input.value = 'טקסט כאן';
     input.type = 'text';
     div.appendChild(input);
     pdfContainer.appendChild(div);
@@ -197,7 +198,7 @@ addTextBtn.addEventListener('click', () => {
     input.focus();
 });
 
-// Signature Handling
+// חתימה
 addSigBtn.addEventListener('click', () => {
     sigModal.classList.remove('hidden');
     initSignaturePad();
@@ -223,7 +224,7 @@ confirmSigBtn.addEventListener('click', () => {
     sigModal.classList.add('hidden');
 });
 
-// Saving Logic
+// שמירת ה-PDF
 const savePDF = async () => {
     try {
         if (!pdfDoc) return;
@@ -237,17 +238,18 @@ const savePDF = async () => {
         const scaleX = width / renderedWidth;
         const scaleY = height / renderedHeight;
 
-        // Save Text
+        // שמירת טקסטים
         const inputs = pdfContainer.querySelectorAll('.text-input');
         for (const input of inputs) {
             const wrapper = input.parentElement;
             const text = input.value;
             const x = wrapper.offsetLeft * scaleX;
+            // תיקון מיקום Y (קואורדינטות PDF הן מלמטה למעלה)
             const y = height - (wrapper.offsetTop * scaleY) - (12 * scaleY);
             firstPage.drawText(text, { x, y, size: 16 * scaleY, color: PDFLib.rgb(0, 0, 0) });
         }
 
-        // Save Signatures
+        // שמירת חתימות
         const sigs = pdfContainer.querySelectorAll('.signature-element img');
         for (const img of sigs) {
             const wrapper = img.parentElement;
@@ -280,7 +282,7 @@ const savePDF = async () => {
         }
     } catch (err) {
         console.error("Save error:", err);
-        showError("Failed to save PDF: " + err.message);
+        showError("שגיאה בשמירה: " + err.message);
     }
 };
 
@@ -290,7 +292,7 @@ const sharePDF = async (blob) => {
         try {
             await navigator.share({
                 title: 'Signed PDF',
-                text: 'Here is the signed document.',
+                text: 'הנה המסמך החתום.',
                 files: [file]
             });
         } catch (err) {
